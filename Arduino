@@ -1,0 +1,89 @@
+#include <lmic.h>	      Serial.println(F("EV_LINK_ALIVE"));
+#include <hal/hal.h>	      break;
+#include <SPI.h>	    default:
+// LoRaWAN NwkSKey, network session key	      Serial.println(F("Unknown event"));
+// This is the default Semtech key, which is used by the early prototype TTN	      break;
+// network.	  }
+static const PROGMEM u1_t NWKSKEY[16] = { 0x4F, 0x30, 0x9C, 0x1C, 0x32, 0xCB, 0x5B, 0xFC, 0xE7, 0x39, 0xDF, 0xD2, 0x57, 0x65, 0x27, 0xC0 };	}
+// LoRaWAN AppSKey, application session key	void do_send(osjob_t* j) {
+// This is the default Semtech key, which is used by the early prototype TTN	  // Check if there is not a current TX/RX job running
+// network.	  if (LMIC.opmode & OP_TXRXPEND) {
+static const u1_t PROGMEM APPSKEY[16] = { 0x40, 0xA2, 0x80, 0x58, 0xC3, 0x25, 0x64, 0xE4, 0xB1, 0x38, 0xE1, 0x86, 0x68, 0x15, 0xEF, 0x26 };	    Serial.println(F("OP_TXRXPEND, not sending"));
+// LoRaWAN end-device address (DevAddr)	  } else {
+static const u4_t DEVADDR = 0x26011855 ; // <-- Change this address for every node!	    // Prepare upstream data transmission at the next possible time.
+// These callbacks are only used in over-the-air activation, so they are	    LMIC_setTxData2(1, mydata, sizeof(mydata) - 1, 0);
+// left empty here (we cannot leave them out completely unless	    Serial.println(F("Packet queued"));
+// DISABLE_JOIN is set in config.h, otherwise the linker will complain).	  }
+void os_getArtEui (u1_t* buf) { }	  // Next TX is scheduled after TX_COMPLETE event.
+void os_getDevEui (u1_t* buf) { }	}
+void os_getDevKey (u1_t* buf) { }	void setup() {
+static uint8_t mydata[] = "Bin is almost FULL";	  Serial.begin(115200);
+static osjob_t sendjob;	  Serial.println(F("Starting"));
+// Schedule TX every this many seconds (might become longer due to duty	 
+// cycle limitations).	#ifdef VCC_ENABLE
+const unsigned TX_INTERVAL = 10;	  // For Pinoccio Scout boards
+// Pin mapping	  pinMode(VCC_ENABLE, OUTPUT);
+const lmic_pinmap lmic_pins = {	  digitalWrite(VCC_ENABLE, HIGH);
+  .nss = 10,	  //delay(1000);
+  .rxtx = LMIC_UNUSED_PIN,	#endif
+  .rst = 5,	  // LMIC init
+  .dio = {2, 3, LMIC_UNUSED_PIN},	  os_init();
+};	  // Reset the MAC state. Session and pending data transfers will be discarded.
+void onEvent (ev_t ev) {	  LMIC_reset();
+  Serial.print(os_getTime());	  // Set static session parameters. Instead of dynamically establishing a session
+  Serial.print(": ");	  // by joining the network, precomputed session parameters are be provided.
+  switch (ev) {	#ifdef PROGMEM
+    case EV_SCAN_TIMEOUT:	  // On AVR, these values are stored in flash and only copied to RAM
+      Serial.println(F("EV_SCAN_TIMEOUT"));	  // once. Copy them to a temporary buffer here, LMIC_setSession will
+      break;	  // copy them into a buffer of its own again.
+    case EV_BEACON_FOUND:	  uint8_t appskey[sizeof(APPSKEY)];
+      Serial.println(F("EV_BEACON_FOUND"));	  uint8_t nwkskey[sizeof(NWKSKEY)];
+      break;	  memcpy_P(appskey, APPSKEY, sizeof(APPSKEY));
+    case EV_BEACON_MISSED:	  memcpy_P(nwkskey, NWKSKEY, sizeof(NWKSKEY));
+      Serial.println(F("EV_BEACON_MISSED"));	  LMIC_setSession (0x1, DEVADDR, nwkskey, appskey);
+      break;	#else
+    case EV_BEACON_TRACKED:	  // If not running an AVR with PROGMEM, just use the arrays directly
+      Serial.println(F("EV_BEACON_TRACKED"));	  LMIC_setSession (0x1, DEVADDR, NWKSKEY, APPSKEY);
+      break;	#endif
+    case EV_JOINING:	#if defined(CFG_eu868)
+      Serial.println(F("EV_JOINING"));	  // Set up the channels used by the Things Network, which corresponds
+      break;	  // to the defaults of most gateways. Without this, only three base
+    case EV_JOINED:	  // channels from the LoRaWAN specification are used, which certainly
+      Serial.println(F("EV_JOINED"));	  // works, so it is good for debugging, but can overload those
+      break;	  // frequencies, so be sure to configure the full frequency range of
+    case EV_RFU1:	  // your network here (unless your network autoconfigures them).
+      Serial.println(F("EV_RFU1"));	  // Setting up channels should happen after LMIC_setSession, as that
+      break;	  // configures the minimal channel set.
+    case EV_JOIN_FAILED:	  // NA-US channels 0-71 are configured automatically
+      Serial.println(F("EV_JOIN_FAILED"));	  LMIC_setupChannel(0, 868100000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band
+      break;	  LMIC_setupChannel(1, 868300000, DR_RANGE_MAP(DR_SF12, DR_SF7B), BAND_CENTI);      // g-band
+    case EV_REJOIN_FAILED:	  LMIC_setupChannel(2, 868500000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band
+      Serial.println(F("EV_REJOIN_FAILED"));	  LMIC_setupChannel(3, 867100000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band
+      break;	  LMIC_setupChannel(4, 867300000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band
+    case EV_TXCOMPLETE:	  LMIC_setupChannel(5, 867500000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band
+      Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));	  LMIC_setupChannel(6, 867700000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band
+      if (LMIC.txrxFlags & TXRX_ACK)	  LMIC_setupChannel(7, 867900000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band
+        Serial.println(F("Received ack"));	  LMIC_setupChannel(8, 868800000, DR_RANGE_MAP(DR_FSK,  DR_FSK),  BAND_MILLI);      // g2-band
+      if (LMIC.dataLen) {	  // TTN defines an additional channel at 869.525Mhz using SF9 for class B
+        Serial.println(F("Received "));	  // devices' ping slots. LMIC does not have an easy way to define set this
+        Serial.println(LMIC.dataLen);	  // frequency and support for class B is spotty and untested, so this
+        Serial.println(F(" bytes of payload"));	  // frequency is not configured here.
+      }	#elif defined(CFG_us915)
+      // Schedule next transmission	  // NA-US channels 0-71 are configured automatically
+      os_setTimedCallback(&sendjob, os_getTime() + sec2osticks(TX_INTERVAL), do_send);	  // but only one group of 8 should (a subband) should be active
+      break;	  // TTN recommends the second sub band, 1 in a zero based count.
+    case EV_LOST_TSYNC:	  // https://github.com/TheThingsNetwork/gateway-conf/blob/master/US-global_conf.json
+      Serial.println(F("EV_LOST_TSYNC"));	  LMIC_selectSubBand(1);
+      break;	#endif
+    case EV_RESET:	  // Disable link check validation
+      Serial.println(F("EV_RESET"));	  LMIC_setLinkCheckMode(0);
+      break;	  // TTN uses SF9 for its RX2 window.
+    case EV_RXCOMPLETE:	  LMIC.dn2Dr = DR_SF9;
+      // data received in ping slot	  // Set data rate and transmit power for uplink (note: txpow seems to be ignored by the library)
+      Serial.println(F("EV_RXCOMPLETE"));	  LMIC_setDrTxpow(DR_SF7, 14);
+      break;	  // Start job
+    case EV_LINK_DEAD:	  do_send(&sendjob);
+      Serial.println(F("EV_LINK_DEAD"));	}
+      break;	void loop() {
+    case EV_LINK_ALIVE:	  os_runloop_once();
+ 	}
